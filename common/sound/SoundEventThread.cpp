@@ -44,35 +44,28 @@ tTVPSoundEventThread::~tTVPSoundEventThread()
 // wake メッセージを受けたときの本体処理 (メインスレッド)。
 void tTVPSoundEventThread::HandleWake()
 {
-	// pending events occur
-	tTJSCriticalSectionHolder holder(Buffers->GetCriticalSection()); // protect the object
-
-	WndProcToBeCalled = false;
-
-	tjs_int64 tick = TVPGetTickCount();
+	// 予定を空にしてから走査し、最も近いものを登録し直す。
+	// 走査中にデコードスレッドが登録した予定は、早い方を残す合流で失われない。
+	BeginWake();
 
 	int nearest_next = TVP_TIMEOFS_INVALID_VALUE;
-
-	for( auto i = Buffers->Begin(); i != Buffers->End(); i++)
 	{
-		int next = (*i)->FireLabelEventsAndGetNearestLabelEventStep(tick);
-			// fire label events and get nearest label event step
-		if(next != TVP_TIMEOFS_INVALID_VALUE)
+		tTJSCriticalSectionHolder holder(Buffers->GetCriticalSection()); // protect the object
+
+		tjs_int64 tick = TVPGetTickCount();
+		for( auto i = Buffers->Begin(); i != Buffers->End(); i++)
 		{
-			if(nearest_next == TVP_TIMEOFS_INVALID_VALUE || nearest_next > next)
-				nearest_next = next;
+			int next = (*i)->FireLabelEventsAndGetNearestLabelEventStep(tick);
+				// fire label events and get nearest label event step
+			if(next != TVP_TIMEOFS_INVALID_VALUE)
+			{
+				if(nearest_next == TVP_TIMEOFS_INVALID_VALUE || nearest_next > next)
+					nearest_next = next;
+			}
 		}
 	}
 
-	if(nearest_next != TVP_TIMEOFS_INVALID_VALUE)
-	{
-		PendingLabelEventExists = true;
-		NextLabelEventTick = TVPGetRoughTickCount32() + nearest_next;
-	}
-	else
-	{
-		PendingLabelEventExists = false;
-	}
+	ReschedulePendingLabelEvent(nearest_next);
 }
 //---------------------------------------------------------------------------
 #ifdef __WINVER__
@@ -100,18 +93,35 @@ void tTVPSoundEventThread::ReschedulePendingLabelEvent(tjs_int tick)
 	if(tick == TVP_TIMEOFS_INVALID_VALUE) return; // no need to reschedule
 	tjs_uint32 eventtick = TVPGetRoughTickCount32() + tick;
 
-	tTJSCriticalSectionHolder holder(Buffers->GetCriticalSection());
-
-	if(PendingLabelEventExists)
-	{
-		if((tjs_int32)NextLabelEventTick - (tjs_int32)eventtick > 0)
-			NextLabelEventTick = eventtick;
-	}
-	else
-	{
-		PendingLabelEventExists = true;
+	std::lock_guard<std::mutex> lock( ScheduleMutex );
+	if(!PendingLabelEventExists || (tjs_int32)NextLabelEventTick - (tjs_int32)eventtick > 0)
 		NextLabelEventTick = eventtick;
-	}
+	PendingLabelEventExists = true;
+}
+//---------------------------------------------------------------------------
+void tTVPSoundEventThread::BeginWake()
+{
+	std::lock_guard<std::mutex> lock( ScheduleMutex );
+	WndProcToBeCalled = false;
+	PendingLabelEventExists = false;
+}
+//---------------------------------------------------------------------------
+// 予定があり、まだ wake を投げていなければ投げる権利を得る
+bool tTVPSoundEventThread::TakeWakeRequest()
+{
+	std::lock_guard<std::mutex> lock( ScheduleMutex );
+	if(!PendingLabelEventExists || WndProcToBeCalled) return false;
+	WndProcToBeCalled = true;
+	return true;
+}
+//---------------------------------------------------------------------------
+// base ms 以内で、次のラベルイベントに間に合う待ち時間
+tjs_int tTVPSoundEventThread::SleepTimeFor(tjs_uint now, tjs_int base)
+{
+	std::lock_guard<std::mutex> lock( ScheduleMutex );
+	if(!PendingLabelEventExists) return base;
+	tjs_int step_to_next = (tjs_int32)NextLabelEventTick - (tjs_int32)now;
+	return std::max<tjs_int>(1, std::min(base, step_to_next));
 }
 //---------------------------------------------------------------------------
 #define TVP_WSB_THREAD_SLEEP_TIME 60
@@ -123,54 +133,33 @@ void tTVPSoundEventThread::Execute(void)
 		tjs_uint32 time = TVPGetRoughTickCount32();
 		TVPPushEnvironNoise(&time, sizeof(time));
 
+		if(TakeWakeRequest())
+		{
+#ifdef __WINVER__
+			EventQueue.PostEvent( NativeEvent(TVP_EV_WAVE_SND_BUF_THREAD) );
+#else
+			Application->SendAppEvent( TVP_EV_WAVE_SND_BUF_THREAD, 0, 0 );
+#endif
+		}
+
+		if(time - LastFilledTick >= TVP_WSB_THREAD_SLEEP_TIME)
 		{	// thread-protected
 			tTJSCriticalSectionHolder holder(Buffers->GetCriticalSection());
-
-			// check PendingLabelEventExists
-			if(PendingLabelEventExists)
+			for(auto i = Buffers->Begin(); i != Buffers->End(); i++)
 			{
-				if(!WndProcToBeCalled)
-				{
-					WndProcToBeCalled = true;
-#ifdef __WINVER__
-					EventQueue.PostEvent( NativeEvent(TVP_EV_WAVE_SND_BUF_THREAD) );
-#else
-					Application->SendAppEvent( TVP_EV_WAVE_SND_BUF_THREAD, 0, 0 );
-#endif
-				}
+				if((*i)->ThreadCallbackEnabled)
+					(*i)->Update();
 			}
-
-			if(time - LastFilledTick >= TVP_WSB_THREAD_SLEEP_TIME)
-			{
-				for(auto i = Buffers->Begin(); i != Buffers->End(); i++)
-				{
-					if((*i)->ThreadCallbackEnabled)
-						(*i)->Update();
-				}
-				LastFilledTick = time;
-			}
+			LastFilledTick = time;
 		}	// end-of-thread-protected
 
-		tjs_uint32 time2;
-		time2 = TVPGetRoughTickCount32();
+		tjs_uint32 time2 = TVPGetRoughTickCount32();
 		time = time2 - time;
 
 		if(time < TVP_WSB_THREAD_SLEEP_TIME)
-		{
-			tjs_int sleep_time = TVP_WSB_THREAD_SLEEP_TIME - time;
-			if(PendingLabelEventExists)
-			{
-				tjs_int step_to_next = (tjs_int32)NextLabelEventTick - (tjs_int32)time2;
-				if(step_to_next < sleep_time)
-					sleep_time = step_to_next;
-				if(sleep_time < 1) sleep_time = 1;
-			}
-			Event.WaitFor(sleep_time);
-		}
+			Event.WaitFor(SleepTimeFor(time2, TVP_WSB_THREAD_SLEEP_TIME - time));
 		else
-		{
 			Event.WaitFor(1);
-		}
 		if( !GetTerminated() ) {
 			bool suspendrequest = false;
 			{

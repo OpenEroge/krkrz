@@ -30,10 +30,17 @@ class tTVPSoundEventThread : public tTVPThread
 	std::mutex SuspendMutex;
 	bool SuspendThread;
 
+	// ラベルイベントの予定。ロック順序は
+	//   tTVPSoundBuffers::BufferCS → 各バッファの BufferCS → ScheduleMutex
+	// ScheduleMutex は末端のロックで、保持中に他のロックを取ったりバッファを呼んだりしない。
+	// そのためバッファのロックを持ったまま (デコードスレッドなど) から
+	// ReschedulePendingLabelEvent を呼んでもよい。
+	std::mutex ScheduleMutex;
 	bool PendingLabelEventExists;
 	bool WndProcToBeCalled;
 	tjs_uint NextLabelEventTick;
-	tjs_uint LastFilledTick;
+
+	tjs_uint LastFilledTick; // playing thread のみが触る
 
 	class tTVPSoundBuffers* Buffers;
 #ifdef __WINVER__
@@ -63,7 +70,13 @@ private:
 		SuspendThread = false;
 	}
 
+	// 以下は ScheduleMutex のみを取る
+	bool TakeWakeRequest();
+	tjs_int SleepTimeFor(tjs_uint now, tjs_int base);
+	void BeginWake();
+
 public:
+	// tick ms 後のラベルイベントを予定に加える (より早い予定が優先)。どのロック下からでも呼べる。
 	void ReschedulePendingLabelEvent(tjs_int tick);
 
 protected:
