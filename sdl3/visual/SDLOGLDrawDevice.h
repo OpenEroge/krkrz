@@ -101,6 +101,7 @@ public:
 
 	//---- 表示処理
 	virtual void TJS_INTF_METHOD Show();
+	void Recreate();
 
 	//---- LayerManager からの画像受け渡し関連
 	virtual void TJS_INTF_METHOD StartBitmapCompletion(iTVPLayerManager * manager);

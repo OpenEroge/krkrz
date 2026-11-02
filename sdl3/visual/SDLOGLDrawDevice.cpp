@@ -124,10 +124,22 @@ void TJS_INTF_METHOD tTVPSDLOGLDrawDevice::Show()
 	}
 #endif // KRKRZ_USE_REPL
 
-	GLContext->Swap();
+	{
+		KRKRZ_RENDER_STATS_SCOPE(TVPRenderStatsAddShowPresent);
+		GLContext->Swap();
+	}
 }
 
 //---------------------------------------------------------------------------
+void tTVPSDLOGLDrawDevice::Recreate()
+{
+	if (!GLContext) return; // The first onResize can precede context creation.
+	GLContext->MakeCurrent();
+	InitPosition();
+	CreateTexture();
+	RequestInvalidation(tTVPRect(0, 0, DestRect.get_width(), DestRect.get_height()));
+}
+
 void tTVPSDLOGLDrawDevice::DestroyTexture()
 {
 	// invalidate Texture object
@@ -490,6 +502,14 @@ TJS_END_NATIVE_CONSTRUCTOR_DECL(/*TJS class name*/SDLOGLDrawDevice)
 //----------------------------------------------------------------------
 // properties
 //----------------------------------------------------------------------
+TJS_BEGIN_NATIVE_METHOD_DECL(recreate)
+{
+	TJS_GET_NATIVE_INSTANCE(_this, tTJSNI_SDLOGLDrawDevice);
+	_this->GetDevice()->Recreate();
+	return TJS_S_OK;
+}
+TJS_END_NATIVE_METHOD_DECL(recreate)
+
 TJS_BEGIN_NATIVE_PROP_DECL(interface)
 {
 	TJS_BEGIN_NATIVE_PROP_GETTER
