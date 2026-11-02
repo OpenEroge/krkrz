@@ -516,6 +516,17 @@ ttstr tTJSInterCodeContext::GetShortDescriptionWithClassName() const
 	return ret;
 }
 //---------------------------------------------------------------------------
+const tjs_char* tTJSInterCodeContext::GetClassNameRaw() const
+{
+	// GetClassName() と同じ規則で親コンテキストの名前を返す (ttstr を作らない版)
+	const tTJSInterCodeContext *parent;
+	if(ContextType == ctPropertySetter || ContextType == ctPropertyGetter)
+		parent = Parent ? Parent->Parent : NULL;
+	else
+		parent = Parent;
+	return parent ? parent->Name : NULL;
+}
+//---------------------------------------------------------------------------
 ttstr tTJSInterCodeContext::GetClassName() const
 {
 	ttstr ret;

@@ -349,6 +349,18 @@ private:
 	ScopeKey		DebuggerScopeKey;		//!< for exec
 	tTJSVariant*	DebuggerRegisterArea;	//!< for exec
 
+	// ExecuteAsFunction ごとの ScopeKey 計算 (名前 3 つの文字列化 + map 検索) は
+	// 呼び出しのたびに走り、デバッガ未接続でも TJS 実行時間の 1 割強を占めていた。
+	// 入力 (start_ip と 3 つの名前ポインタ) が前回と同じなら前回の結果を使う。
+	// デバッガ接続中は従来どおり毎回計算する。
+	ScopeKey		DebuggerScopeKeyCache;
+	tjs_int			DebuggerScopeKeyCacheIP = -1;
+	const tjs_char*	DebuggerScopeKeyCacheClass = nullptr;
+	const tjs_char*	DebuggerScopeKeyCacheFunc = nullptr;
+	const tjs_char*	DebuggerScopeKeyCacheFile = nullptr;
+	void UpdateDebuggerScopeKey(tjs_int start_ip);
+	const tjs_char* GetClassNameRaw() const;
+
 public:
 	tTJSContextType GetContextType() const { return ContextType; }
 	const tjs_char *GetContextTypeName() const;

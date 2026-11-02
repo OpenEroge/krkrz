@@ -772,6 +772,28 @@ void TJSVariantArrayStackCompactNow()
 //---------------------------------------------------------------------------
 // tTJSInterCodeContext ( class definitions are in tjsInterCodeGen.h )
 //---------------------------------------------------------------------------
+void tTJSInterCodeContext::UpdateDebuggerScopeKey(tjs_int start_ip)
+{
+	const tjs_char *classname = GetClassNameRaw();
+	const tjs_char *funcname = GetName();
+	const tjs_char *filename = Block->GetName();
+	if( TVPDebuggerWantsHook() ) {
+		// 接続中は従来どおり毎回計算 (名前が解放・再確保されてもアドレス一致で誤ヒットしない)
+		TJSDebuggerGetScopeKey( DebuggerScopeKey, classname, funcname, filename, start_ip );
+		DebuggerScopeKeyCacheIP = -1;
+		return;
+	}
+	if( start_ip != DebuggerScopeKeyCacheIP || classname != DebuggerScopeKeyCacheClass ||
+		funcname != DebuggerScopeKeyCacheFunc || filename != DebuggerScopeKeyCacheFile ) {
+		TJSDebuggerGetScopeKey( DebuggerScopeKeyCache, classname, funcname, filename, start_ip );
+		DebuggerScopeKeyCacheIP = start_ip;
+		DebuggerScopeKeyCacheClass = classname;
+		DebuggerScopeKeyCacheFunc = funcname;
+		DebuggerScopeKeyCacheFile = filename;
+	}
+	DebuggerScopeKey = DebuggerScopeKeyCache;
+}
+//---------------------------------------------------------------------------
 void tTJSInterCodeContext::ExecuteAsFunction(iTJSDispatch2 *objthis,
 	tTJSVariant **args, tjs_int numargs, tTJSVariant *result, tjs_int start_ip)
 {
@@ -886,7 +908,7 @@ void tTJSInterCodeContext::ExecuteAsFunction(iTJSDispatch2 *objthis,
 			}
 			oldkey = DebuggerScopeKey;
 			oldra = DebuggerRegisterArea;
-			TJSDebuggerGetScopeKey( DebuggerScopeKey, GetClassName().c_str(), GetName(), Block->GetName(), start_ip );
+			UpdateDebuggerScopeKey( start_ip );
 			DebuggerRegisterArea = ra;
 			// execute
 			ExecuteCode(ra, start_ip, args, numargs, result);
