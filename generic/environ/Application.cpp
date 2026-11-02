@@ -5,6 +5,7 @@
 
 #include "tjsError.h"
 #include "tjsDebug.h"
+#include "EngineHooks.h"
 
 #include <errno.h>
 #include <string>
@@ -327,6 +328,7 @@ void tTVPApplication::RequestUpdate()
 void
 tTVPApplication::Dispatch()
 {
+	TVPRunDispatchHooks();
 	KRKRZ_RENDER_STATS_SCOPE(TVPRenderStatsAddFrameDispatch);
 	try {
 		// 送信に失敗してリトライキューに積まれたイベントを再送する。

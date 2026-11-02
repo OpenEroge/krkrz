@@ -12,6 +12,7 @@
 #include "DebugIntf.h"
 #include "tjsDictionary.h"
 #include "ScriptMgnIntf.h"
+#include "EngineHooks.h"
 
 bool TVPAcceptSaveAsPNG(void* formatdata, const ttstr & type, class iTJSDispatch2** dic )
 {
@@ -184,6 +185,8 @@ void TVPLoadPNG(void* formatdata, void *callbackdata, tTVPGraphicSizeCallback si
 	tTVPGraphicScanLineCallback scanlinecallback, tTVPMetaInfoPushCallback metainfopushcallback,
 	iTJSBinaryStream *src, tjs_int keyidx,  tTVPGraphicLoadMode mode)
 {
+	// another format stored under a .png name (EngineHooks.h)
+	if (TVPRunGraphicSniffers(sizecallback, scanlinecallback, callbackdata, src, mode)) return;
 	png_structp png_ptr=NULL;
 	png_infop info_ptr=NULL;
 	png_infop end_info=NULL;
@@ -604,6 +607,7 @@ void TVPSaveAsPNG(void* formatdata, iTJSBinaryStream* dst, const tTVPBaseBitmap*
 
 void TVPLoadHeaderPNG(void* formatdata, iTJSBinaryStream *src, iTJSDispatch2** dic )
 {
+	if (TVPRunGraphicHeaderSniffers(src, dic)) return;
 	png_structp png_ptr=NULL;
 	png_infop info_ptr=NULL;
 	png_infop end_info=NULL;

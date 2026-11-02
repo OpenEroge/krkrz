@@ -27,6 +27,10 @@
 #endif
 
 #include <algorithm>
+#include <chrono>
+#include "EngineHooks.h"
+#include <chrono>
+#include "EngineHooks.h"
 
 #ifdef KRKRZ_HAS_ELEMENTS
 #include "elements/ElementsDialogManager.h"
@@ -71,6 +75,9 @@ tTVPSDLOGLDrawDevice::~tTVPSDLOGLDrawDevice()
 void TJS_INTF_METHOD tTVPSDLOGLDrawDevice::Show()
 {
 	if (!GLContext) return;
+	using tClock = std::chrono::steady_clock;
+	const bool measure = TVPHasPresentHooks();
+	const auto showStart = measure ? tClock::now() : tClock::time_point{};
 
 	GLContext->MakeCurrent();
 	InitPosition();
@@ -124,9 +131,15 @@ void TJS_INTF_METHOD tTVPSDLOGLDrawDevice::Show()
 	}
 #endif // KRKRZ_USE_REPL
 
+	const auto swapStart = measure ? tClock::now() : tClock::time_point{};
 	{
 		KRKRZ_RENDER_STATS_SCOPE(TVPRenderStatsAddShowPresent);
 		GLContext->Swap();
+	}
+	if (measure) {
+		const auto end = tClock::now();
+		TVPRunPresentHooks(std::chrono::duration_cast<std::chrono::nanoseconds>(end - swapStart).count(),
+			std::chrono::duration_cast<std::chrono::nanoseconds>(end - showStart).count());
 	}
 }
 

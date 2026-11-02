@@ -87,6 +87,7 @@ common/base/EventIntf.cpp
 common/base/FileAllocator.cpp
 common/base/KrkrzAllocator.cpp
 common/base/SoundAllocator.cpp
+common/base/EngineHooks.cpp
 common/base/PluginIntf.cpp
 common/base/PooledAllocator.cpp
 common/base/ScriptMgnIntf.cpp

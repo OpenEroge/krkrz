@@ -36,6 +36,7 @@
 #include <filesystem>
 #include "md5.h"                 // Storages.getMD5HashString
 #include "ScriptMgnIntf.h"       // TVPGetScriptDispatch (Storages.fstat の Date)
+#include "EngineHooks.h"         // storage resolution / event hooks
 
 #define TVP_DEFAULT_ARCHIVE_CACHE_NUM 64
 #define TVP_DEFAULT_AUTOPATH_CACHE_NUM 256
@@ -1632,6 +1633,7 @@ static tjs_uint TVPRebuildAutoPathTable()
 
 	tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
 	if(AutoPathTableInit) return 0;
+	TVPRunStorageEventHooks("rebuild", ttstr());
 
 	TVPAutoPathTable.Clear();
 
@@ -1719,6 +1721,7 @@ static tjs_uint TVPRebuildAutoPathTable()
 				}
 			} lister;
 			TVPStorageMediaManager.GetListAt(path, &lister);
+			TVPRunStorageEventHooks("scan", path);
 
 			if( !TVPIgnoreFileProperty )
 			{
@@ -1769,11 +1772,23 @@ static tjs_uint TVPRebuildAutoPathTable()
 //---------------------------------------------------------------------------
 // TVPGetPlacedPath
 //---------------------------------------------------------------------------
-ttstr TVPGetPlacedPath(const ttstr & name)
+ttstr TVPGetPlacedPath(const ttstr & requested)
 {
 	try
 	{
 		tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+
+		// Redirect hooks see every request before the cache, because their
+		// answer may change between calls (EngineHooks.h).
+		ttstr name(requested);
+		{
+			ttstr redirected;
+			switch (TVPRunStorageRedirectHooks(requested, redirected)) {
+			case tTVPStorageRedirect::Placed: return TVPMakeIndependentString(redirected);
+			case tTVPStorageRedirect::Renamed: name = redirected; break;
+			default: break;
+			}
+		}
 
 #ifndef TVP_DONT_CLEAR_AUTOPATH_CACHE
 	// search path and return the path which the "name" is placed.
@@ -1813,6 +1828,14 @@ ttstr TVPGetPlacedPath(const ttstr & name)
 
 		ttstr storagename = TVPExtractStorageName(normalized);
 
+		// Leaf hooks override every auto path (e.g. a patch pack).
+		{
+			const ttstr placed = TVPRunStorageLeafHooks(storagename);
+			if (!placed.IsEmpty()) {
+				TVPAutoPathCache.Add(TVPMakeIndependentString(name), TVPMakeIndependentString(placed));
+				return TVPMakeIndependentString(placed);
+			}
+		}
 		TVPRebuildAutoPathTable(); // ensure auto path table
 		tTVPFileInfo *result = TVPFindAutoPathTable(storagename);
 		if(result && (result->Flag & tTVPFileInfo::EMPTY_FILE) == 0 )
@@ -1821,6 +1844,26 @@ ttstr TVPGetPlacedPath(const ttstr & name)
 			TVPAutoPathCache.Add(TVPMakeIndependentString(name),
 				TVPMakeIndependentString(result->FilePath));
 			return TVPMakeIndependentString(result->FilePath);
+		}
+
+		// Fallback hooks name alternative leaves (e.g. hashed archive names);
+		// regular names across all paths always win over them.
+		{
+			std::vector<ttstr> alternatives;
+			TVPRunStorageFallbackHooks(storagename, alternatives);
+			for (const ttstr &alt : alternatives) {
+				ttstr resolved;
+				const ttstr sibling = TVPExtractStoragePath(normalized) + alt;
+				if (TVPIsExistentStorageNoSearchNoNormalize(sibling)) resolved = sibling;
+				else {
+					tTVPFileInfo *found = TVPFindAutoPathTable(alt);
+					if (found && !(found->Flag & tTVPFileInfo::EMPTY_FILE)) resolved = found->FilePath;
+				}
+				if (!resolved.IsEmpty()) {
+					TVPAutoPathCache.Add(TVPMakeIndependentString(name), TVPMakeIndependentString(resolved));
+					return TVPMakeIndependentString(resolved);
+				}
+			}
 		}
 
 		// not found
@@ -2155,6 +2198,7 @@ void TVPClearStorageCaches()
 	TVPClearXP3SegmentCache();
 	{
 		tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+		TVPRunStorageEventHooks("clear", ttstr());
 		TVPClearAutoPathCache();
 	}
 }
