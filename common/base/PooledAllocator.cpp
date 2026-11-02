@@ -453,6 +453,9 @@ void *TVPPooledAllocator::allocate(size_t size, TVPAllocTag tag) {
 		size_t need = (size + ALIGN - 1) & ~(ALIGN - 1);
 		if (need < MIN_BLOCK - BLOCK_HEADER_SIZE) need = MIN_BLOCK - BLOCK_HEADER_SIZE;
 
+		void *pooled = nullptr;
+		size_t used_after = 0;
+		{
 		std::lock_guard<std::mutex> lk(mu_);
 		int fl, sl;
 		Block *b = pool_corrupted_ ? nullptr : findSuitable(need, fl, sl);
@@ -478,8 +481,15 @@ void *TVPPooledAllocator::allocate(size_t size, TVPAllocTag tag) {
 			RecordVerbose({ VerboseKind::PoolAlloc, tag, name_, payload, actual_payload, size,
 			                pool_used_.load(std::memory_order_relaxed) });
 #endif
-			firePressureIfNeeded(pool_used_.load(std::memory_order_relaxed));
-			return payload;
+			pooled = payload;
+			used_after = pool_used_.load(std::memory_order_relaxed);
+		}
+		}
+		if (pooled) {
+			// The pressure callback frees storage caches, i.e. re-enters free()
+			// on this allocator: mu_ must be released first (it is not recursive).
+			firePressureIfNeeded(used_after);
+			return pooled;
 		}
 		// pool 枯渇 → fallback
 	}
