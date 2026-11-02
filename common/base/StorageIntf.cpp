@@ -1520,6 +1520,71 @@ tTJSHashTable<ttstr, tTVPFileInfo, tTJSHashFunc<ttstr>, TVP_AUTO_PATH_HASH_SIZE>
 	TVPAutoPathTable;
 bool AutoPathTableInit = false;
 //---------------------------------------------------------------------------
+// Incremental auto path index
+//
+// Upstream drops and rebuilds the whole auto path table whenever a path is
+// added or removed, any file is written, or the application is deactivated.
+// Games that call Storages.addAutoPath repeatedly at run time then rescan
+// every directory again and again (0.3s per rebuild here). With the
+// incremental index (default; -autopath_incremental=no restores the old
+// behaviour for comparison):
+//  * registering a path that is already registered is a no-op;
+//  * a newly added path is indexed on its own and overrides older entries;
+//  * directory listings are cached by directory mtime (data is never cached);
+//  * compaction keeps the index, a write only drops it when the written file
+//    lies directly in an auto path. Storages.clearStorageCaches() refreshes
+//    everything explicitly.
+//---------------------------------------------------------------------------
+namespace {
+bool TVPIncrementalAutoPath()
+{
+	static const bool enabled = [] {
+		tTJSVariant option;
+		return !TVPGetCommandLine(TJS_W("-autopath_incremental"), &option) || ttstr(option) != TJS_W("no");
+	}();
+	return enabled;
+}
+struct tTVPDirListing {
+	std::filesystem::file_time_type modified;
+	std::vector<ttstr> names;
+};
+std::map<tjs_string, tTVPDirListing> TVPDirListings;
+size_t TVPIndexedAutoPathCount = 0; // leading entries of TVPAutoPathList already in the table
+// Called with TVPCreateStreamCS held. Directory mtime follows symlinks and
+// changes for creates/deletes/renames.
+void TVPGetCachedListAt(const ttstr &path, iTVPStorageLister *dest)
+{
+	if (!TVPIncrementalAutoPath()) {
+		TVPStorageMediaManager.GetListAt(path, dest);
+		TVPRunStorageEventHooks("scan", path);
+		return;
+	}
+	std::error_code error;
+	std::filesystem::file_time_type modified{};
+	bool cacheable = path.StartsWith(TJS_W("file://"));
+	if (cacheable) {
+		ttstr local = TVPGetLocallyAccessibleName(path);
+		modified = std::filesystem::last_write_time(std::filesystem::path(local.AsStdString()), error);
+		cacheable = !error;
+	}
+	const auto key = path.AsStdString();
+	auto found = TVPDirListings.find(key);
+	if (cacheable && found != TVPDirListings.end() && found->second.modified == modified) {
+		for (const auto &name : found->second.names) dest->Add(name);
+		TVPRunStorageEventHooks("listing_hit", path);
+		return;
+	}
+	struct Collector : iTVPStorageLister {
+		std::vector<ttstr> names;
+		void TJS_INTF_METHOD Add(const ttstr &name) override { names.emplace_back(name.c_str(), name.GetLen()); }
+	} collected;
+	TVPStorageMediaManager.GetListAt(path, &collected);
+	TVPRunStorageEventHooks("scan", path);
+	for (const auto &name : collected.names) dest->Add(name);
+	if (cacheable) TVPDirListings[key] = {modified, std::move(collected.names)};
+}
+}
+//---------------------------------------------------------------------------
 
 void TVPAddAutoPathTable(const ttstr & name, const tTVPFileInfo &info)
 {
@@ -1572,6 +1637,7 @@ void TVPAddAutoPathCacheFile(const ttstr & name)
 //---------------------------------------------------------------------------
 static void TVPClearAutoPathCache()
 {
+	TVPIndexedAutoPathCount = 0;
 	TVPAutoPathCache.Clear();
 	TVPAutoPathTable.Clear();
 	AutoPathTableInit = false;
@@ -1585,7 +1651,9 @@ struct tTVPClearAutoPathCacheCallback : public tTVPCompactEventCallbackIntf
 		{
 			// clear the auto search path cache on application deactivate
 			tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
-			TVPClearAutoPathCache();
+			// Compaction evicts data, not the resource directory index.
+			if (TVPIncrementalAutoPath()) TVPAutoPathCache.Clear();
+			else TVPClearAutoPathCache();
 		}
 	}
 } static TVPClearAutoPathCacheCallback;
@@ -1604,8 +1672,12 @@ void TVPAddAutoPath(const ttstr & name)
 		std::find(TVPAutoPathList.begin(), TVPAutoPathList.end(), normalized);
 	if(i == TVPAutoPathList.end())
 		TVPAutoPathList.push_back(normalized);
-
-	TVPClearAutoPathCache();
+	else if (TVPIncrementalAutoPath()) return; // already registered: precedence is unchanged
+	if (!TVPIncrementalAutoPath()) { TVPClearAutoPathCache(); return; }
+	// Existing entries stay valid: the new, highest-priority path is indexed
+	// lazily and overwrites matching names in the usual registration order.
+	TVPAutoPathCache.Clear();
+	AutoPathTableInit = false;
 }
 //---------------------------------------------------------------------------
 void TVPRemoveAutoPath(const ttstr &name)
@@ -1622,6 +1694,7 @@ void TVPRemoveAutoPath(const ttstr &name)
 		std::find(TVPAutoPathList.begin(), TVPAutoPathList.end(), normalized);
 	if(i != TVPAutoPathList.end())
 		TVPAutoPathList.erase(i);
+	else if (TVPIncrementalAutoPath()) return; // not registered: nothing changes
 
 	TVPClearAutoPathCache();
 }
@@ -1635,7 +1708,7 @@ static tjs_uint TVPRebuildAutoPathTable()
 	if(AutoPathTableInit) return 0;
 	TVPRunStorageEventHooks("rebuild", ttstr());
 
-	TVPAutoPathTable.Clear();
+	if (TVPIndexedAutoPathCount == 0) TVPAutoPathTable.Clear();
 
 	tjs_uint64 tick = TVPGetTickCount();
  	TVPAddLog( (const tjs_char*)TVPInfoRebuildingAutoPath );
@@ -1643,7 +1716,7 @@ static tjs_uint TVPRebuildAutoPathTable()
 	tjs_uint totalcount = 0;
 
 	std::vector<ttstr>::iterator it;
-	for(it = TVPAutoPathList.begin(); it != TVPAutoPathList.end(); it++)
+	for(it = TVPAutoPathList.begin() + TVPIndexedAutoPathCount; it != TVPAutoPathList.end(); it++)
 	{
 		const ttstr & path = *it;
 		tjs_uint count = 0;
@@ -1720,8 +1793,7 @@ static tjs_uint TVPRebuildAutoPathTable()
 					list.insert( file );
 				}
 			} lister;
-			TVPStorageMediaManager.GetListAt(path, &lister);
-			TVPRunStorageEventHooks("scan", path);
+			TVPGetCachedListAt(path, &lister);
 
 			if( !TVPIgnoreFileProperty )
 			{
@@ -1761,6 +1833,7 @@ static tjs_uint TVPRebuildAutoPathTable()
 			TJS_W(" (") + ttstr((tjs_int)(endtick - tick)) + TJS_W("ms)"));
 
 	AutoPathTableInit = true;
+	TVPIndexedAutoPathCount = TVPAutoPathList.size();
 
 	return totalcount;
 }
@@ -1960,6 +2033,18 @@ iTJSDispatch2* TVPGetFilePropertyNoAddRef( const ttstr& name )
 	return nullptr;
 }
 
+// A storage was opened for writing: drop what may now be stale.
+static void TVPInvalidateForWrite(const ttstr &name)
+{
+	tTJSCriticalSectionHolder lock(TVPCreateStreamCS);
+	TVPRunStorageEventHooks("write", name);
+	if (!TVPIncrementalAutoPath()) { TVPClearStorageCaches(); return; }
+	TVPClearXP3SegmentCache();
+	TVPAutoPathCache.Clear(); // also discards cached misses
+	const auto parent = TVPExtractStoragePath(name);
+	if (std::find(TVPAutoPathList.begin(), TVPAutoPathList.end(), parent) != TVPAutoPathList.end())
+		TVPClearAutoPathCache();
+}
 // 内部呼び出し用
 // name は正規化済み
 iTJSBinaryStream * _InnerTVPCreateStream(const ttstr &name, tjs_uint32 flags)
@@ -2012,14 +2097,14 @@ iTJSBinaryStream * _InnerTVPCreateStream(const ttstr &name, tjs_uint32 flags)
 	catch(...)
 	{
 #ifndef TVP_DONT_CLEAR_AUTOPATH_CACHE
-		if(access >= 1) TVPClearStorageCaches();
+		if(access >= 1) TVPInvalidateForWrite(name);
 #else
 		if(access >= 1) TVPClearXP3SegmentCache();
 #endif
 		throw;
 	}
 #ifndef TVP_DONT_CLEAR_AUTOPATH_CACHE
-	if(access >= 1) TVPClearStorageCaches();
+	if(access >= 1) TVPInvalidateForWrite(name);
 #else
 	if(access >= 1) {
 		// キャッシュから情報を消して再検索されるようにする
@@ -2198,6 +2283,7 @@ void TVPClearStorageCaches()
 	TVPClearXP3SegmentCache();
 	{
 		tTJSCriticalSectionHolder cs_holder(TVPCreateStreamCS);
+		TVPDirListings.clear();
 		TVPRunStorageEventHooks("clear", ttstr());
 		TVPClearAutoPathCache();
 	}
