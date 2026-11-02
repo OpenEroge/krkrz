@@ -102,4 +102,12 @@ public:
 extern iTVPMoviePlayer*TVPCreateMoviePlayer(const tjs_char *filename, bool preferYUV=false);
 extern iTVPMoviePlayer*TVPCreateMoviePlayer(IMovieReadStream *stream, const char *filename, bool preferYUV=false);
 
+// アプリ側 (静的リンクされた追加コード) が登録できる追加デコーダ。TVPCreateMoviePlayer の
+// 両版の先頭で呼ばれ、扱えない形式なら nullptr を返す (以降は内蔵の振り分けへ進む)。
+// stream 版から呼ばれたときは stream != nullptr で、成功時のみ callee が stream を所有する
+// (失敗時は呼び出し側が release)。ファイルパス版では stream == nullptr。
+typedef iTVPMoviePlayer *(*tTVPExternalMoviePlayerFactory)(
+	IMovieReadStream *stream, const char *utf8name, bool preferYUV);
+extern tTVPExternalMoviePlayerFactory TVPExternalMoviePlayerFactory;
+
 #endif

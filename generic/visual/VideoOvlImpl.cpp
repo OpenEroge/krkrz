@@ -68,6 +68,10 @@ tTJSNI_VideoOverlay::tTJSNI_VideoOverlay()
 , PrepareFallback(false)
 , PrepareQuiet(false)
 , LoopPlay(false)
+, PeriodEventFrame(-1)
+, PeriodFired(false)
+, SegLoopStartFrame(-1)
+, SegLoopEndFrame(-1)
 , Presenter(nullptr)
 , PresenterRegistered(false)
 , mUseYUV(false)
@@ -122,6 +126,24 @@ tTJSNI_VideoOverlay::CheckUpdate()
 		mPlayer->Play();
 		FirePeriodEvent(perLoop);
 		return;
+	}
+	if (Status == tTVPVideoOverlayStatus::Play && mPlayer && mPlayer->IsPlaying()
+	    && (PeriodEventFrame >= 0 || SegLoopEndFrame > 0)) {
+		const double fps = mPlayer->FrameRate();
+		if (fps > 0.0) {
+			const tjs_int64 frame = (tjs_int64)(mPlayer->Position() * fps / 1000000.0);
+			if (SegLoopEndFrame > 0 && frame >= SegLoopEndFrame) {
+				// 区間ループ終端: 開始コマへ戻す (WINVER の perSegLoop と同じ)
+				tjs_int start = SegLoopStartFrame > 0 ? SegLoopStartFrame : 0;
+				mPlayer->Seek( (int64_t)(start * 1000000.0 / fps) );
+				FirePeriodEvent(perSegLoop);
+				return;
+			}
+			if (PeriodEventFrame >= 0) {
+				if (frame < PeriodEventFrame) PeriodFired = false;
+				else if (!PeriodFired) { PeriodFired = true; FirePeriodEvent(perPeriod); }
+			}
+		}
 	}
 	if (Status == tTVPVideoOverlayStatus::Play || Status == tTVPVideoOverlayStatus::Pause) {
 		SetStatusAsync( mPlayer->IsPlaying() ? tTVPVideoOverlayStatus::Play : tTVPVideoOverlayStatus::Stop );
@@ -437,9 +459,15 @@ void tTJSNI_VideoOverlay::Prepare() {
 	if (Window) Window->AddVideoOverlay(this);
 }
 //---------------------------------------------------------------------------
-void tTJSNI_VideoOverlay::SetSegmentLoop( int comeFrame, int goFrame ) {}
+void tTJSNI_VideoOverlay::SetSegmentLoop( int comeFrame, int goFrame ) {
+	SegLoopStartFrame = comeFrame;
+	SegLoopEndFrame = goFrame;
+}
 //---------------------------------------------------------------------------
-void tTJSNI_VideoOverlay::SetPeriodEvent( int eventFrame ) {}
+void tTJSNI_VideoOverlay::SetPeriodEvent( int eventFrame ) {
+	PeriodEventFrame = eventFrame;
+	PeriodFired = false;
+}
 //---------------------------------------------------------------------------
 void tTJSNI_VideoOverlay::SetRectangleToVideoOverlay() {}
 //---------------------------------------------------------------------------

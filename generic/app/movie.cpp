@@ -200,12 +200,20 @@ class tTVPMoviePlayer : public iTVPMoviePlayer {
   std::atomic<bool> mDelivered;
 };
 
+// 追加デコーダ (MoviePlayer.h 参照)。未登録なら nullptr
+tTVPExternalMoviePlayerFactory TVPExternalMoviePlayerFactory = nullptr;
+
 // CreatePlayer (ファイルパス版)
 iTVPMoviePlayer*
 TVPCreateMoviePlayer(const tjs_char *filename, bool preferYUV)
 {
   std::string nfilename;
   TVPUtf16ToUtf8(nfilename, filename);
+
+  if (TVPExternalMoviePlayerFactory) {
+    if (iTVPMoviePlayer *p = TVPExternalMoviePlayerFactory(nullptr, nfilename.c_str(), preferYUV))
+      return p;
+  }
 
   // MPEG-1 (.mpg/.mpeg) は movie-player (webm 専用) では扱えないので pl_mpeg 内蔵
   // プレイヤへ振り分ける。pl_mpeg は全データを要するのでファイルを丸読みする。
@@ -237,6 +245,10 @@ TVPCreateMoviePlayer(const tjs_char *filename, bool preferYUV)
 iTVPMoviePlayer*
 TVPCreateMoviePlayer(IMovieReadStream *stream, const char *filename, bool preferYUV)
 {
+  if (TVPExternalMoviePlayerFactory) {
+    if (iTVPMoviePlayer *p = TVPExternalMoviePlayerFactory(stream, filename, preferYUV))
+      return p;   // 成功: stream は callee が所有
+  }
   // MPEG-1 (.mpg/.mpeg) は pl_mpeg 内蔵プレイヤへ。pl_mpeg は全データを要するので
   // ストリームを丸読みする。所有権契約 (成功時のみ callee が stream を release、
   // 失敗時は呼び出し側が release) を守るため、読み込みでは release せず、player 生成が

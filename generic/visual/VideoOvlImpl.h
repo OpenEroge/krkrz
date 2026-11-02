@@ -58,6 +58,13 @@ class tTJSNI_VideoOverlay : public tTJSNI_BaseVideoOverlay
 	//! perLoop を発火する (WINVER の vsEnded / EC_COMPLETE → 巻き戻しと同じ形)。
 	bool LoopPlay;
 
+	//! setPeriodEvent / setSegmentLoop (コマ番号、-1 = 無効)。CheckUpdate で再生位置を
+	//! コマへ換算して判定する。PeriodFired は位置が period より前へ戻ると再武装する。
+	tjs_int PeriodEventFrame;
+	bool PeriodFired;
+	tjs_int SegLoopStartFrame;
+	tjs_int SegLoopEndFrame;
+
 	// overlay 動画 (非 layer) を DrawDevice へ pull 型で渡す presenter。現在の DrawDevice が
 	// 対応 host を公開していれば登録して使い (SDL 等)、無ければ従来 push (UpdateVideo) へ
 	// フォールバックする。実体は環境別 (sdl3/visual/SDLVideoPresenter.cpp 等)。
@@ -110,7 +117,7 @@ public:
 	void Prepare();
 
 	void SetSegmentLoop( int comeFrame, int goFrame );
-	void CancelSegmentLoop() {}
+	void CancelSegmentLoop() { SegLoopStartFrame = SegLoopEndFrame = -1; }
 	void SetPeriodEvent( int eventFrame );
 
 	void SetStopFrame( tjs_int f );
@@ -159,9 +166,9 @@ public:
 	tjs_real GetPlayRate();
 	void SetPlayRate(tjs_real r);
 
-	tjs_int GetSegmentLoopStartFrame() { return 0; }
-	tjs_int GetSegmentLoopEndFrame() { return 0; }
-	tjs_int GetPeriodEventFrame() { return 0; }
+	tjs_int GetSegmentLoopStartFrame() { return SegLoopStartFrame; }
+	tjs_int GetSegmentLoopEndFrame() { return SegLoopEndFrame; }
+	tjs_int GetPeriodEventFrame() { return PeriodEventFrame; }
 
 	tjs_int GetAudioBalance();
 	void SetAudioBalance(tjs_int b);
