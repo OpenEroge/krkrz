@@ -80,12 +80,20 @@ static float sBmFactor[] =
 //---------------------------------------------------------------------------
 static tjs_int GetAdaptiveThreadNum(tjs_int pixelNum, float factor)
 {
-  // 閾値乗数は CMake -DKRKRZ_THREAD_PIXEL_SCALE=N (デフォルト 500) で調整可能。
-  // ThreadIntf.h で fallback 定義あり。
-  if (pixelNum >= factor * KRKRZ_THREAD_PIXEL_SCALE)
-    return TVPGetThreadNum();
-  else
+  // 閾値乗数は CMake -DKRKRZ_THREAD_PIXEL_SCALE=N (デフォルト 100) で調整可能。
+  // 分割数の上限は 1 task あたり factor * TVPDrawThreadChunkScale pixel (ThreadIntf.h)。
+  if (!(pixelNum >= factor * KRKRZ_THREAD_PIXEL_SCALE))
     return 1;
+  const tjs_int maxNum = TVPGetThreadNum();
+  // 閾値を超えたら面積に応じて分割数を決める (1 task >= factor * chunk pixel)。
+  // chunk <= 0 は旧挙動 (全スレッド)。double で計算して大きな値でも溢れないようにする。
+  const double chunk = (double)factor * (double)TVPDrawThreadChunkScale;
+  if (!(chunk > 0.0))
+    return maxNum;
+  const double num = (double)pixelNum / chunk;
+  if (num >= (double)maxNum)
+    return maxNum;
+  return num >= 2.0 ? (tjs_int)num : 1;
 }
 //---------------------------------------------------------------------------
 #define RET_VOID

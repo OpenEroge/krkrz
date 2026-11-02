@@ -18,6 +18,13 @@
 #include <assert.h>
 #include <system_error>
 #include <chrono>
+#if defined(__linux__) && !defined(__ANDROID__)
+#include <sched.h>
+#include <cstdio>
+#include <cstring>
+#include <set>
+#include <string>
+#endif
 
 //---------------------------------------------------------------------------
 // DrawThreadPool 利用統計 (KRKRZ_DRAW_STATS で ON)
@@ -480,15 +487,67 @@ tTVPThread::GetHandle() const {
 
 //---------------------------------------------------------------------------
 tjs_int TVPDrawThreadNum = 1;
+tjs_int TVPDrawThreadChunkScale = KRKRZ_THREAD_CHUNK_SCALE;
 //---------------------------------------------------------------------------
 extern tjs_int TVPGetProcessorNum( void );
 
 //---------------------------------------------------------------------------
+#if defined(__linux__) && !defined(__ANDROID__)
+// 実行を許可された CPU のうち物理コアの数 (SMT の兄弟は 1 つと数える)。
+// sysfs の core_cpus_list (旧カーネルは thread_siblings_list) を兄弟集合のキーにする。
+// affinity / sysfs が読めない CPU が 1 つでもあれば 0 を返し、呼び出し側は論理数に戻す。
+static tjs_int TVPCountAllowedPhysicalCores()
+{
+	cpu_set_t allowed;
+	CPU_ZERO( &allowed );
+	if( sched_getaffinity( 0, sizeof( allowed ), &allowed ) != 0 ) return 0;
+	std::set<std::string> cores;
+	for( int cpu = 0; cpu < CPU_SETSIZE; cpu++ ) {
+		if( !CPU_ISSET( cpu, &allowed ) ) continue;
+		static const char *const files[] = { "core_cpus_list", "thread_siblings_list" };
+		std::string key;
+		for( const char *file : files ) {
+			char path[128];
+			std::snprintf( path, sizeof( path ), "/sys/devices/system/cpu/cpu%d/topology/%s", cpu, file );
+			FILE *fp = std::fopen( path, "r" );
+			if( !fp ) continue;
+			char buf[256];
+			if( std::fgets( buf, sizeof( buf ), fp ) ) {
+				buf[ std::strcspn( buf, "\r\n" ) ] = '\0';
+				key = buf;
+			}
+			std::fclose( fp );
+			if( !key.empty() ) break;
+		}
+		if( key.empty() ) return 0;
+		cores.insert( key );
+	}
+	return (tjs_int)cores.size();
+}
+#endif
+//---------------------------------------------------------------------------
+// -drawthread 未指定 (auto) 時のプールサイズ。
+// 論理コア数 (SMT 込み) だと同じ物理コアの兄弟スレッドに描画を分けてしまい、
+// 合成は速くならず CPU 時間だけが増えるため、取得できれば物理コア数を使う。
+static tjs_int TVPGetAutoThreadNum()
+{
+	static const tjs_int num = []() -> tjs_int {
+		tjs_int logical = TVPGetProcessorNum();
+		if( logical < 1 ) logical = 1;
+#if defined(__linux__) && !defined(__ANDROID__)
+		tjs_int physical = TVPCountAllowedPhysicalCores();
+		if( physical >= 1 && physical <= logical ) return physical;
+#endif
+		return logical;
+	}();
+	return num;
+}
+//---------------------------------------------------------------------------
 tjs_int TVPGetThreadNum( void )
 {
-	tjs_int threadNum = TVPDrawThreadNum ? TVPDrawThreadNum : TVPGetProcessorNum();
+	tjs_int threadNum = TVPDrawThreadNum > 0 ? TVPDrawThreadNum : TVPGetAutoThreadNum();
 	threadNum = std::min( threadNum, TVPMaxThreadNum );
-	return threadNum;
+	return std::max<tjs_int>( threadNum, 1 );
 }
 //---------------------------------------------------------------------------
 static void TJS_USERENTRY DummyThreadTask( void * ) {}

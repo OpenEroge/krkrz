@@ -457,6 +457,19 @@ void TVPAfterSystemInit()
         }
         TVPDrawThreadNum = drawThreadNum;
 
+        // 分散描画の 1 task あたり最小 pixel 乗数 (ThreadIntf.h の KRKRZ_THREAD_CHUNK_SCALE)。
+        // 0 で旧挙動 (閾値を超えたら全スレッド)。負値や数値でない指定は既定値のまま。
+        if (TVPGetCommandLine(TJS_W("-drawthreadchunk"), &opt)) {
+          ttstr str(opt);
+          bool numeric = !str.IsEmpty() && str.GetLen() <= 9; // tjs_int に収まる桁数
+          for (const tjs_char *p = str.c_str(); numeric && *p; ++p)
+            numeric = (*p >= TJS_W('0') && *p <= TJS_W('9'));
+          if (numeric)
+            TVPDrawThreadChunkScale = (tjs_int)opt;
+          else
+            TVPAddLog(TJS_W("(warning) ignoring invalid -drawthreadchunk=") + str);
+        }
+
         // DrawStats log output (KRKRZ_DRAW_STATS=ON ビルド時のみ意味あり)。
         // TJS の System.setDrawStatsLog(true) と同じものを起動オプションで
         // 切り替えるためのフック。Android のように TJS hook を仕込みづらい

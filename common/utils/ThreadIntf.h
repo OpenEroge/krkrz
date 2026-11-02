@@ -152,6 +152,18 @@ public:
 #define KRKRZ_THREAD_PIXEL_SCALE 100
 #endif
 
+// 分散時の 1 task あたり最小 pixel 数の乗数。
+// 閾値を超えた描画を "全スレッド" ではなく "pixelNum / (factor * CHUNK)" 本
+// (1..TVPGetThreadNum() に clamp) に分割する。整屏 alpha blend を 20 本に細切れにすると
+// 1 本あたりのスループットが落ち、合成速度はほぼ同じまま CPU 時間が数倍になったため
+// (Ryzen 10C/20T、1080p、skip 中に計測)。起動オプション -drawthreadchunk=N で上書き、
+// 0 で旧挙動 (閾値超えなら全スレッド)。
+#ifndef KRKRZ_THREAD_CHUNK_SCALE
+#define KRKRZ_THREAD_CHUNK_SCALE 10000
+#endif
+extern tjs_int TVPDrawThreadNum;
+extern tjs_int TVPDrawThreadChunkScale;
+
 /*[*/
 const tjs_int TVPMaxThreadNum = 64;
 typedef void (TJS_USERENTRY *TVP_THREAD_TASK_FUNC)(void *);
