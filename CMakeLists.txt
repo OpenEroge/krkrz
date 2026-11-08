@@ -83,6 +83,12 @@ set(VCPKG_MANIFEST_DIR "${CMAKE_BINARY_DIR}" CACHE PATH
 
 project(${PROJECT_NAME} VERSION ${PROJECT_VERSION})
 
+# Apple: .mm を含むターゲットはどのディレクトリにも現れうるので、
+# サブディレクトリ追加より前に OBJCXX を有効化しておく。
+if(APPLE)
+	enable_language(OBJCXX)
+endif()
+
 option(MASTER "build master version" OFF)
 
 option(KRKRZ_USE_SJIS "use sjis" OFF)

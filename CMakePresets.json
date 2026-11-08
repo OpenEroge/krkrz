@@ -137,7 +137,8 @@
                 "VCPKG_CRT_LINKAGE":"dynamic",
                 "VCPKG_LIBRARY_LINKAGE":"static",
                 "KRKRZ_USE_OPENGL":"ON",
-                "VCPKG_OVERLAY_TRIPLETS":"${sourceDir}/cmake/vcpkg-triplets"
+                "VCPKG_OVERLAY_TRIPLETS":"${sourceDir}/cmake/vcpkg-triplets",
+                "CMAKE_POLICY_VERSION_MINIMUM":"3.5"
             }
         },
         {
