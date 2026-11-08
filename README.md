@@ -12,6 +12,17 @@ TJS2 スクリプトエンジン + ノベルゲームランタイム「吉里吉
 - 外部ライブラリは極力そのまま参照する構成で、依存解決に **vcpkg** を使います
   (SDL3 は最新版を追うため `FetchContent` で取得します)
 
+## 対応プラットフォーム (このフォーク)
+
+このフォーク ([FORK.md](FORK.md)) で動作を確認・保守する対象は次のとおりです。
+
+| プラットフォーム | 扱い |
+|---|---|
+| **Linux** | 主要サポート対象 |
+| **macOS** (Apple Silicon / `arm64-osx`) | 主要サポート対象 |
+| Windows | ベストエフォート (ビルドが通るよう努めますが、動作確認は限定的です) |
+| Android / iOS / wasm | 対象外 (上流の構成をそのまま残しているだけです) |
+
 使い方・クラスリファレンス・ガイドは [公開サイト](https://wamsoft.github.io/krkrz_dev/) にあります。
 
 ## リポジトリの位置づけ
@@ -80,7 +91,24 @@ Debian 11 / glibc 2.31 ベース) です。互換性の考え方・使い方・�
 
 ### macOS
 
-整備中。
+Xcode Command Line Tools と Homebrew の `cmake` / `ninja` を入れ、vcpkg を用意します
+(下記)。Apple Silicon では `arm64-osx` プリセットを使います。
+
+```bash
+cmake --preset arm64-osx
+cmake --build build/arm64-osx --config Release
+```
+
+成果物は `build/arm64-osx/Release/krkrz.app` です。macOS には OpenGL ES が無いため、
+ANGLE (Metal バックエンド) を `Contents/Frameworks` に同梱しています。
+
+```bash
+# ゲームフォルダは絶対パスで渡す
+build/arm64-osx/Release/krkrz.app/Contents/MacOS/krkrz "$PWD/data/"
+```
+
+> 初回の configure は vcpkg が依存をソースからビルドするため時間がかかります
+> (特に ANGLE)。
 
 ### vcpkg
 

@@ -13,6 +13,17 @@ runtime — extended from Windows-only to multiple platforms.
 - External libraries are referenced as-is wherever possible, and dependencies are resolved with
   **vcpkg** (SDL3 is fetched with `FetchContent` to track the latest version)
 
+## Supported platforms (this fork)
+
+This fork ([FORK.md](FORK.md)) verifies and maintains the following targets.
+
+| Platform | Status |
+|---|---|
+| **Linux** | Primary target |
+| **macOS** (Apple Silicon / `arm64-osx`) | Primary target |
+| Windows | Best effort (we try to keep it building, but testing is limited) |
+| Android / iOS / wasm | Not targeted (the upstream setup is simply left in place) |
+
 Usage, the class reference and guides are on the [documentation site](https://wamsoft.github.io/krkrz_dev/en/).
 
 ## Where this repository fits
@@ -80,7 +91,24 @@ environment above.
 
 ### macOS
 
-Work in progress.
+Install the Xcode Command Line Tools and `cmake` / `ninja` from Homebrew, then set up vcpkg
+(see below). On Apple Silicon, use the `arm64-osx` preset.
+
+```bash
+cmake --preset arm64-osx
+cmake --build build/arm64-osx --config Release
+```
+
+The result is `build/arm64-osx/Release/krkrz.app`. macOS has no OpenGL ES, so ANGLE (Metal
+backend) is bundled in `Contents/Frameworks`.
+
+```bash
+# pass the game folder as an absolute path
+build/arm64-osx/Release/krkrz.app/Contents/MacOS/krkrz "$PWD/data/"
+```
+
+> The first configure is slow because vcpkg builds the dependencies from source (ANGLE in
+> particular).
 
 ### vcpkg
 
