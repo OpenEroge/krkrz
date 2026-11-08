@@ -1,13 +1,13 @@
 [submodule "external/movie-player"]
 	path = external/movie-player
-	url = https://github.com/wamsoft/movie-player.git
+	url = https://github.com/OpenEroge/movie-player.git
 [submodule "external/elements"]
 	path = external/elements
-	url = https://github.com/wamsoft/elements.git
+	url = https://github.com/OpenEroge/elements.git
 	branch = develop
 [submodule "external/glyphware"]
 	path = external/glyphware
-	url = https://github.com/wamsoft/glyphware.git
+	url = https://github.com/OpenEroge/glyphware.git
 [submodule "external/appserve"]
 	path = external/appserve
-	url = https://github.com/wamsoft/appserve.git
+	url = https://github.com/OpenEroge/appserve.git
